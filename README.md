@@ -1,6 +1,6 @@
 # Chat App
 
-A React chatbot with Gemini AI, user auth, MongoDB persistence, and client-side data analysis. Glassmorphism UI with streaming responses, CSV upload, code execution, and interactive charts.
+A React chatbot with Gemini AI, web search, user auth, MongoDB persistence, and client-side data analysis. Glassmorphism UI with streaming responses, CSV upload, and code execution.
 
 ## How It Works
 
