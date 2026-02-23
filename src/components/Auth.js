@@ -1,6 +1,13 @@
 import { useState } from 'react';
-import { createUser, findUser } from '../services/mongoApi';
+import { apiUrl } from '../services/mongoApi';
 import './Auth.css';
+
+function buildErrorDetail(url, res, text) {
+  const status = res?.status ?? 'N/A';
+  const contentType = res?.headers?.get?.('content-type') ?? 'unknown';
+  const bodyPreview = (text ?? '').slice(0, 300);
+  return `URL: ${url}\nStatus: ${status}\nContent-Type: ${contentType}\nBody: ${bodyPreview || '(empty)'}`;
+}
 
 export default function Auth({ onLogin }) {
   const [mode, setMode] = useState('login');
@@ -16,10 +23,37 @@ export default function Auth({ onLogin }) {
     e.preventDefault();
     setError('');
     setLoading(true);
+    const name = username.trim().toLowerCase();
+    const url = mode === 'create' ? apiUrl('/api/users') : apiUrl('/api/users/login');
+    const body =
+      mode === 'create'
+        ? { username: name, password, email: email.trim(), firstName: firstName.trim(), lastName: lastName.trim() }
+        : { username: name, password };
+
     try {
-      const name = username.trim().toLowerCase();
+      let res;
+      try {
+        res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      } catch (fetchErr) {
+        throw new Error(`URL: ${url}\nFetch threw: ${fetchErr.message || 'Request failed'}`);
+      }
+      const text = await res.text();
+
+      if (!res.ok) {
+        let msg = buildErrorDetail(url, res, text);
+        try {
+          const j = JSON.parse(text);
+          if (j?.error) msg = `${j.error}\n\n--- Debug ---\n${msg}`;
+        } catch {}
+        throw new Error(msg);
+      }
+
+      const data = text ? JSON.parse(text) : {};
       if (mode === 'create') {
-        await createUser(name, password, email.trim(), firstName.trim(), lastName.trim());
         setError('');
         setMode('login');
         setPassword('');
@@ -27,17 +61,16 @@ export default function Auth({ onLogin }) {
         setFirstName('');
         setLastName('');
       } else {
-        const user = await findUser(name, password);
-        if (!user) throw new Error('User not found or invalid password');
-        onLogin(user);
+        if (!data.ok)
+          throw new Error(buildErrorDetail(url, res, text));
+        onLogin({
+          username: data.username,
+          firstName: data.firstName ?? null,
+          lastName: data.lastName ?? null,
+        });
       }
     } catch (err) {
-      try {
-        const j = JSON.parse(err.message);
-        setError(j.error || err.message);
-      } catch {
-        setError(err.message || 'Something went wrong');
-      }
+      setError(err.message || 'Something went wrong');
     } finally {
       setLoading(false);
     }

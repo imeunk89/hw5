@@ -99,6 +99,8 @@
   background: rgba(248, 113, 113, 0.1);
   border: 1px solid rgba(248, 113, 113, 0.2);
   border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .auth-switch {
