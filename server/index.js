@@ -1,5 +1,6 @@
 console.log("SERVER BOOT: start");
 const path = require('path');
+const fs = require('fs');
 require('node:dns').setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const express = require('express');
@@ -101,22 +102,6 @@ async function connect() {
   const client = await MongoClient.connect(URI);
   db = client.db(DB);
   console.log("SERVER BOOT: Mongo connected");
-}
-
-if (process.env.NODE_ENV !== 'production') {
-  app.get('/', (req, res) => {
-    res.send(`
-    <html>
-      <body style="font-family:sans-serif;padding:2rem;background:#00356b;color:white;min-height:100vh;display:flex;align-items:center;justify-content:center;margin:0">
-        <div style="text-align:center">
-          <h1>Chat API Server</h1>
-          <p>Backend is running. Use the React app at <a href="http://localhost:3000" style="color:#ffd700">localhost:3000</a></p>
-          <p><a href="/api/status" style="color:#ffd700">Check DB status</a></p>
-        </div>
-      </body>
-    </html>
-  `);
-  });
 }
 
 app.get('/api/status', async (req, res) => {
@@ -490,12 +475,13 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// ── Production: serve React build ─────────────────────────────────────────────
+// ── Serve React build when build folder exists ─────────────────────────────────
 
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '..', 'build')));
+const buildPath = path.join(__dirname, '..', 'build');
+if (fs.existsSync(buildPath)) {
+  app.use(express.static(buildPath));
   app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'build', 'index.html'));
+    res.sendFile(path.join(buildPath, 'index.html'));
   });
 }
 
