@@ -1,5 +1,3 @@
-import API_BASE from './apiBase';
-
 function parseApiResponse(text) {
   if (!text || !text.trim()) return {};
   if (text.trim().startsWith('<')) {
@@ -13,8 +11,7 @@ function parseApiResponse(text) {
 }
 
 const api = async (path, options = {}) => {
-  const base = (API_BASE || '').replace(/\/$/, '');
-  const url = path.startsWith('http') ? path : `${base}${path.startsWith('/') ? path : `/${path}`}`;
+  const url = path.startsWith('http') ? path : (path.startsWith('/') ? path : `/${path}`);
   const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json', ...options.headers },
     ...options,
@@ -96,11 +93,6 @@ export const loadMessages = async (sessionId) => {
 
 // ── YouTube channel download ─────────────────────────────────────────────────
 
-export function apiUrl(path) {
-  const base = (API_BASE || '').replace(/\/$/, '');
-  return `${base}${path.startsWith('/') ? path : `/${path}`}`;
-}
-
 async function youtubeFetch(url, options = {}) {
   const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json', ...options.headers },
@@ -128,7 +120,7 @@ export const startYoutubeDownload = async (channelUrl, maxVideos) => {
     channelUrl: String(channelUrl || '').trim(),
     maxVideos: Number(maxVideos) || 10,
   };
-  return youtubeFetch(apiUrl('/api/youtube/download'), {
+  return youtubeFetch('/api/youtube/download', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -136,7 +128,7 @@ export const startYoutubeDownload = async (channelUrl, maxVideos) => {
 };
 
 export const getYoutubeProgress = async (jobId) => {
-  return youtubeFetch(apiUrl(`/api/youtube/progress/${jobId}`));
+  return youtubeFetch(`/api/youtube/progress/${jobId}`);
 };
 
 // ── JSON upload (channel data for chat) ──────────────────────────────────────
