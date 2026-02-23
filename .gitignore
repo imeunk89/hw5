@@ -13,6 +13,9 @@
 
 # misc
 .DS_Store
+/downloads
+/json_store
+/generated-images
 .env
 .env.local
 .env.development.local

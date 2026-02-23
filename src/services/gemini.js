@@ -3,7 +3,7 @@ import { CSV_TOOL_DECLARATIONS } from './csvTools';
 
 const genAI = new GoogleGenerativeAI(process.env.REACT_APP_GEMINI_API_KEY || '');
 
-const MODEL = 'gemini-2.0-flash';
+const MODEL = 'gemini-2.5-flash';
 
 const SEARCH_TOOL = { googleSearch: {} };
 const CODE_EXEC_TOOL = { codeExecution: {} };
@@ -33,8 +33,19 @@ async function loadSystemPrompt() {
 // useCodeExecution: pass true to use codeExecution tool (CSV/analysis),
 //                   false (default) to use googleSearch tool.
 // Note: Gemini does not support both tools simultaneously.
-export const streamChat = async function* (history, newMessage, imageParts = [], useCodeExecution = false) {
-  const systemInstruction = await loadSystemPrompt();
+// userContext: optional { firstName?, lastName?, username } — logged-in user profile for personalization.
+export const streamChat = async function* (history, newMessage, imageParts = [], useCodeExecution = false, userContext = null) {
+  let systemInstruction = await loadSystemPrompt();
+  // Chat personalization: inject user name from profile so AI addresses them by first name
+  if (userContext) {
+    const displayName = userContext.firstName
+      ? [userContext.firstName, userContext.lastName].filter(Boolean).join(' ').trim()
+      : userContext.username;
+    if (displayName) {
+      const firstName = userContext.firstName || userContext.username;
+      systemInstruction = `${systemInstruction}\n\n[Personalization] The user's name is ${displayName}. Address them by their first name (${firstName}) in your first response, and use their name naturally when appropriate.`;
+    }
+  }
   const tools = useCodeExecution ? [CODE_EXEC_TOOL] : [SEARCH_TOOL];
   const model = genAI.getGenerativeModel({
     model: MODEL,
@@ -127,9 +138,20 @@ export const streamChat = async function* (history, newMessage, imageParts = [],
 //
 // executeFn(toolName, args) → plain JS object with the result
 // Returns the final text response from the model.
+// userContext: optional { firstName?, lastName?, username } — logged-in user profile for personalization.
 
-export const chatWithCsvTools = async (history, newMessage, csvHeaders, executeFn) => {
-  const systemInstruction = await loadSystemPrompt();
+export const chatWithCsvTools = async (history, newMessage, csvHeaders, executeFn, userContext = null, imageParts = []) => {
+  let systemInstruction = await loadSystemPrompt();
+  // Chat personalization: inject user name from profile so AI addresses them by first name
+  if (userContext) {
+    const displayName = userContext.firstName
+      ? [userContext.firstName, userContext.lastName].filter(Boolean).join(' ').trim()
+      : userContext.username;
+    if (displayName) {
+      const firstName = userContext.firstName || userContext.username;
+      systemInstruction = `${systemInstruction}\n\n[Personalization] The user's name is ${displayName}. Address them by their first name (${firstName}) in your first response, and use their name naturally when appropriate.`;
+    }
+  }
   const model = genAI.getGenerativeModel({
     model: MODEL,
     tools: [{ functionDeclarations: CSV_TOOL_DECLARATIONS }],
@@ -158,7 +180,14 @@ export const chatWithCsvTools = async (history, newMessage, csvHeaders, executeF
     ? `[CSV columns: ${csvHeaders.join(', ')}]\n\n${newMessage}`
     : newMessage;
 
-  let response = (await chat.sendMessage(msgWithContext)).response;
+  const msgParts = [
+    { text: msgWithContext },
+    ...imageParts.map((img) => ({
+      inlineData: { mimeType: img.mimeType || 'image/png', data: img.data },
+    })),
+  ].filter((p) => (p.text !== undefined && p.text !== '') || p.inlineData !== undefined);
+
+  let response = (await chat.sendMessage(msgParts)).response;
 
   // Accumulate chart payloads and a log of every tool call made
   const charts = [];
@@ -172,7 +201,7 @@ export const chatWithCsvTools = async (history, newMessage, csvHeaders, executeF
 
     const { name, args } = funcCall.functionCall;
     console.log('[CSV Tool]', name, args);
-    const toolResult = executeFn(name, args);
+    const toolResult = await Promise.resolve(executeFn(name, args));
     console.log('[CSV Tool result]', toolResult);
 
     // Log the call for persistence
@@ -181,6 +210,10 @@ export const chatWithCsvTools = async (history, newMessage, csvHeaders, executeF
     // Capture chart payloads so the UI can render them
     if (toolResult?._chartType) {
       charts.push(toolResult);
+    }
+    // Capture generated images from generateImage tool
+    if (name === 'generateImage' && toolResult?.imageUrl && !toolResult?.error) {
+      charts.push({ _chartType: 'generated_image', imageUrl: toolResult.imageUrl });
     }
 
     response = (

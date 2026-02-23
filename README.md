@@ -18,6 +18,7 @@ Create a `.env` file in the project root with:
 | `REACT_APP_GEMINI_API_KEY` | Yes | Frontend (baked in at build) | Google Gemini API key. Get one at [Google AI Studio](https://aistudio.google.com/apikey). |
 | `REACT_APP_MONGODB_URI` | Yes | Backend | MongoDB Atlas connection string. Format: `mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/` |
 | `REACT_APP_API_URL` | Production only | Frontend (baked in at build) | Full URL of the backend, e.g. `https://your-backend.onrender.com`. Leave blank for local dev (proxy handles it). |
+| `YOUTUBE_API_KEY` | For channel download | Backend | YouTube Data API v3 key. [Google Cloud Console](https://console.cloud.google.com/) → APIs → YouTube Data API v3 → Credentials. |
 
 The backend also accepts `MONGODB_URI` or `REACT_APP_MONGO_URI` as the MongoDB connection string if you prefer those names.
 
@@ -48,7 +49,9 @@ One document per registered user.
 | `_id` | ObjectId | Auto-generated |
 | `username` | string | Lowercase username |
 | `password` | string | bcrypt hash |
-| `email` | string | Email address (optional) |
+| `email` | string | Email address |
+| `firstName` | string | First name (required for new users; legacy users may lack this) |
+| `lastName` | string | Last name (required for new users; legacy users may lack this) |
 | `createdAt` | string | ISO timestamp |
 
 #### Collection: `sessions`
@@ -226,6 +229,7 @@ All packages are installed via `npm install`. Key dependencies:
 - **Tool routing logic** – The app automatically routes requests: client-side JS tools for simple stats, Python code execution for plots and complex models, Google Search for factual queries
 - **Markdown rendering** – AI responses render headers, lists, code blocks, tables, and links
 - **Image support** – Attach images via drag-and-drop, the 📎 button, or paste from clipboard (Ctrl+V)
+- **YouTube Channel Download** – Export channel video data as JSON: title, description, duration, stats, transcript (when available). Polling-based progress; files saved in `downloads/`.
 
 ## Chat System Prompt
 

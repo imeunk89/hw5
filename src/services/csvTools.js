@@ -9,6 +9,30 @@ const COL_NOTE = 'Use the exact column name as it appears in the [CSV columns: .
 
 export const CSV_TOOL_DECLARATIONS = [
   {
+    name: 'generateImage',
+    description:
+      'Generate an image from a text prompt. Optionally use an anchor/reference image the user attached. Use when the user asks for a thumbnail, visual mockup, infographic, or any image creation.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        prompt: {
+          type: 'STRING',
+          description: 'Detailed text description of the image to generate (e.g. "YouTube thumbnail with scientist and colorful lab equipment, bold text").',
+        },
+        anchorImage: {
+          type: 'OBJECT',
+          description: 'Optional reference image. Pass when user attached an image and wants something similar or based on it.',
+          properties: {
+            name: { type: 'STRING', description: 'File name of the attached image.' },
+            mimeType: { type: 'STRING', description: 'MIME type (e.g. image/png, image/jpeg).' },
+            base64: { type: 'STRING', description: 'Base64-encoded image data.' },
+          },
+        },
+      },
+      required: ['prompt'],
+    },
+  },
+  {
     name: 'compute_column_stats',
     description:
       'Compute descriptive statistics (mean, median, std, min, max, count) for a numeric column. ' + COL_NOTE,
@@ -37,6 +61,36 @@ export const CSV_TOOL_DECLARATIONS = [
         top_n: { type: 'NUMBER', description: 'How many top values to return (default 10)' },
       },
       required: ['column'],
+    },
+  },
+  {
+    name: 'plot_metric_vs_time',
+    description:
+      'Plot a numeric metric from the loaded JSON channel data over time (by release_date). Renders a time series chart. Use when the user asks to visualize how views, likes, comments, or duration trend over time.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        metric: {
+          type: 'STRING',
+          description: 'Numeric field name from the video objects. Examples: view_count, like_count, comment_count, duration.',
+        },
+      },
+      required: ['metric'],
+    },
+  },
+  {
+    name: 'compute_stats_json',
+    description:
+      'Compute descriptive statistics (mean, median, std, min, max, count) for a numeric field in the loaded JSON channel data. Use when the user has uploaded a YouTube channel JSON file and asks for stats on view_count, like_count, comment_count, duration, etc.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        field: {
+          type: 'STRING',
+          description: 'Numeric field name from the video objects. Examples: view_count, like_count, comment_count, duration.',
+        },
+      },
+      required: ['field'],
     },
   },
   {
@@ -256,7 +310,19 @@ export const computeDatasetSummary = (rows, headers) => {
 
 // ── Client-side tool executor ─────────────────────────────────────────────────
 
-export const executeTool = (toolName, args, rows) => {
+export const executeTool = (toolName, args, rows, jsonExecutor = null, plotExecutor = null, imageExecutor = null) => {
+  if (toolName === 'generateImage') {
+    if (imageExecutor) return imageExecutor(args);
+    return { error: 'Image generation is not available.' };
+  }
+  if (toolName === 'compute_stats_json') {
+    if (jsonExecutor) return jsonExecutor(args);
+    return { error: 'No JSON channel data loaded. Upload a YouTube channel JSON file first.' };
+  }
+  if (toolName === 'plot_metric_vs_time') {
+    if (plotExecutor) return plotExecutor(args);
+    return { error: 'No JSON channel data loaded. Upload a YouTube channel JSON file first.' };
+  }
   const availableHeaders = rows.length ? Object.keys(rows[0]) : [];
   console.group(`[CSV Tool] ${toolName}`);
   console.log('args:', args);

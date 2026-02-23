@@ -1,4 +1,7 @@
-require('dotenv').config();
+console.log("SERVER BOOT: start");
+const path = require('path');
+require('node:dns').setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
@@ -8,15 +11,96 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// ── YouTube routes first (before any static/catch-all) ───────────────────────
+const { runDownload, DOWNLOADS_DIR } = require('./youtube');
+const youtubeJobs = new Map();
+
+function generateJobId() {
+  return `job_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+app.post('/api/youtube/download', async (req, res) => {
+  try {
+    const { channelUrl, maxVideos = 10 } = req.body;
+    if (!channelUrl || typeof channelUrl !== 'string')
+      return res.status(400).json({ error: 'channelUrl (string) required' });
+
+    const jobId = generateJobId();
+    youtubeJobs.set(jobId, { status: 'pending', progress: 0, message: 'Starting...' });
+
+    res.json({ ok: true, jobId });
+
+    const job = youtubeJobs.get(jobId);
+    job.status = 'running';
+
+    const max = Math.min(100, Math.max(1, parseInt(maxVideos, 10) || 10));
+    runDownload(channelUrl.trim(), max, (percent, message) => {
+      const j = youtubeJobs.get(jobId);
+      if (j && j.status === 'running') {
+        j.progress = percent;
+        j.message = message;
+      }
+    })
+      .then(({ fileName, videoCount }) => {
+        const j = youtubeJobs.get(jobId);
+        if (j) {
+          j.status = 'complete';
+          j.progress = 100;
+          j.message = 'Complete';
+          j.fileName = fileName;
+          j.publicUrl = `/api/youtube/downloads/${fileName}`;
+          j.videoCount = videoCount;
+        }
+      })
+      .catch((err) => {
+        const j = youtubeJobs.get(jobId);
+        if (j) {
+          j.status = 'error';
+          j.error = err.message || 'Download failed';
+        }
+      });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/youtube/progress/:jobId', (req, res) => {
+  const job = youtubeJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  const { status, progress, message, error, fileName, publicUrl, videoCount } = job;
+  if (status === 'complete') {
+    res.json({ ok: true, status: 'complete', fileName, publicUrl, videoCount });
+  } else if (status === 'error') {
+    res.json({ ok: false, status: 'error', error });
+  } else {
+    res.json({ status: 'running', progress, message });
+  }
+});
+
+app.get('/api/youtube/downloads/:fileName', (req, res) => {
+  const fileName = req.params.fileName;
+  if (!/^channel_\d+\.json$/.test(fileName))
+    return res.status(400).json({ error: 'Invalid file name' });
+  const filePath = path.resolve(DOWNLOADS_DIR, fileName);
+  res.sendFile(filePath, (err) => {
+    if (err && !res.headersSent) res.status(404).json({ error: 'File not found' });
+  });
+});
+
+// ── Rest of app ─────────────────────────────────────────────────────────────
+
 const URI = process.env.REACT_APP_MONGODB_URI || process.env.MONGODB_URI || process.env.REACT_APP_MONGO_URI;
 const DB = 'chatapp';
+
+const { createChatModel } = require('./geminiChat');
 
 let db;
 
 async function connect() {
+  console.log("SERVER BOOT: before Mongo connect");
   const client = await MongoClient.connect(URI);
   db = client.db(DB);
-  console.log('MongoDB connected');
+  console.log("SERVER BOOT: Mongo connected");
 }
 
 app.get('/', (req, res) => {
@@ -47,20 +131,34 @@ app.get('/api/status', async (req, res) => {
 
 app.post('/api/users', async (req, res) => {
   try {
-    const { username, password, email } = req.body;
-    if (!username || !password)
-      return res.status(400).json({ error: 'Username and password required' });
+    const { username, email, password, firstName, lastName } = req.body;
+    if (!username || !email || !password)
+      return res.status(400).json({ error: 'username, email, and password required' });
+    if (!firstName || !lastName)
+      return res.status(400).json({ error: 'firstName and lastName required' });
     const name = String(username).trim().toLowerCase();
-    const existing = await db.collection('users').findOne({ username: name });
-    if (existing) return res.status(400).json({ error: 'Username already exists' });
+    const emailNorm = String(email).trim().toLowerCase();
+    const first = String(firstName).trim();
+    const last = String(lastName).trim();
+    const existingByEmail = await db.collection('users').findOne({ email: emailNorm });
+    if (existingByEmail)
+      return res.status(409).json({ ok: false, error: 'Email already exists' });
+    const existingByUsername = await db.collection('users').findOne({ username: name });
+    if (existingByUsername)
+      return res.status(400).json({ error: 'Username already exists' });
     const hashed = await bcrypt.hash(password, 10);
-    await db.collection('users').insertOne({
+    const result = await db.collection('users').insertOne({
       username: name,
+      email: emailNorm,
+      firstName: first,
+      lastName: last,
       password: hashed,
-      email: email ? String(email).trim().toLowerCase() : null,
       createdAt: new Date().toISOString(),
     });
-    res.json({ ok: true });
+    res.json({
+      ok: true,
+      user: { id: result.insertedId.toString(), username: name, email: emailNorm, firstName: first, lastName: last },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -76,7 +174,13 @@ app.post('/api/users/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'User not found' });
     const ok = await bcrypt.compare(password, user.password);
     if (!ok) return res.status(401).json({ error: 'Invalid password' });
-    res.json({ ok: true, username: name });
+    // Return firstName/lastName for personalization; existing users may lack these (graceful fallback)
+    res.json({
+      ok: true,
+      username: name,
+      firstName: user.firstName ?? null,
+      lastName: user.lastName ?? null,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -206,15 +310,197 @@ app.get('/api/messages', async (req, res) => {
   }
 });
 
+// ── Generated images (generateImage tool) ───────────────────────────────────
+
+const IMAGES_STORE_DIR = path.join(__dirname, '..', 'generated-images');
+
+function generateImageId() {
+  return `img_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// Serve generated images as static files
+app.use('/generated', express.static(IMAGES_STORE_DIR, { maxAge: '1d' }));
+
+app.post('/api/images/generate', async (req, res) => {
+  try {
+    const { prompt, anchorImage } = req.body;
+    if (!prompt || typeof prompt !== 'string' || !prompt.trim())
+      return res.status(400).json({ error: 'prompt (string) is required' });
+
+    const apiBase = process.env.REACT_APP_API_URL || `http://localhost:${process.env.PORT || 3001}`;
+    const storeDir = path.resolve(IMAGES_STORE_DIR);
+    await require('fs').promises.mkdir(storeDir, { recursive: true });
+
+    // Minimal implementation: generate SVG placeholder with prompt text
+    const escapedPrompt = String(prompt)
+      .trim()
+      .slice(0, 120)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+    const words = escapedPrompt.split(/\s+/);
+    const lines = [];
+    let line = '';
+    for (const w of words) {
+      if (line.length + w.length + 1 > 36) {
+        if (line) lines.push(line);
+        line = w;
+      } else {
+        line = line ? `${line} ${w}` : w;
+      }
+    }
+    if (line) lines.push(line);
+
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="384" viewBox="0 0 512 384">
+  <rect width="512" height="384" fill="#1a1a2e"/>
+  <rect x="16" y="16" width="480" height="352" rx="12" fill="none" stroke="#818cf8" stroke-width="2"/>
+  <text x="256" y="170" text-anchor="middle" fill="#e2e8f0" font-family="Inter,sans-serif" font-size="14">
+    ${lines.slice(0, 5).map((l, i) => `<tspan x="256" dy="${i === 0 ? 0 : 20}">${l}</tspan>`).join('')}
+  </text>
+  <text x="256" y="340" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-family="Inter,sans-serif" font-size="11">Generated</text>
+</svg>`;
+
+    const imgId = generateImageId();
+    const fileName = `${imgId}.svg`;
+    const filePath = path.join(storeDir, fileName);
+    await require('fs').promises.writeFile(filePath, svg, 'utf8');
+
+    const imageUrl = `${apiBase.replace(/\/$/, '')}/generated/${fileName}`;
+    res.json({ imageUrl });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── JSON upload (channel data for chat) ──────────────────────────────────────
+
+const JSON_STORE_DIR = path.join(__dirname, '..', 'json_store');
+
+function generateJsonId() {
+  return `json_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+app.post('/api/json/upload', async (req, res) => {
+  try {
+    const body = req.body;
+    if (!body || typeof body !== 'object')
+      return res.status(400).json({ error: 'JSON body required' });
+    const jsonId = generateJsonId();
+    const fileName = `${jsonId}.json`;
+    const storeDir = path.resolve(JSON_STORE_DIR);
+    await require('fs').promises.mkdir(storeDir, { recursive: true });
+    await require('fs').promises.writeFile(
+      path.join(storeDir, fileName),
+      JSON.stringify(body, null, 2)
+    );
+    res.json({ ok: true, jsonId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/json/:jsonId', async (req, res) => {
+  try {
+    const jsonId = req.params.jsonId;
+    if (!/^json_\d+_[a-z0-9]+$/.test(jsonId))
+      return res.status(400).json({ error: 'Invalid jsonId' });
+    const filePath = path.join(JSON_STORE_DIR, `${jsonId}.json`);
+    const data = await require('fs').promises.readFile(filePath, 'utf8');
+    res.json(JSON.parse(data));
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'Not found' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/json/compute-stats', (req, res) => {
+  try {
+    const { field, jsonId, data } = req.body;
+    if (!field || typeof field !== 'string')
+      return res.status(400).json({ error: 'field (string) is required' });
+
+    let videos = [];
+    if (data?.videos && Array.isArray(data.videos)) {
+      videos = data.videos;
+    } else if (jsonId && /^json_\d+_[a-z0-9]+$/.test(jsonId)) {
+      const fp = path.join(JSON_STORE_DIR, `${jsonId}.json`);
+      const raw = require('fs').readFileSync(fp, 'utf8');
+      const parsed = JSON.parse(raw);
+      videos = parsed?.videos || [];
+    }
+    if (!videos.length) return res.status(400).json({ error: 'No video data. Load JSON channel data first.' });
+
+    const vals = videos.map((v) => (v[field] != null ? Number(v[field]) : NaN)).filter((n) => !Number.isNaN(n) && typeof n === 'number');
+    if (!vals.length)
+      return res.status(400).json({
+        error: `Field "${field}" has no numeric values. Try: view_count, like_count, comment_count, duration.`,
+      });
+
+    const sum = vals.reduce((a, b) => a + b, 0);
+    const mean = sum / vals.length;
+    const sorted = [...vals].sort((a, b) => a - b);
+    const median =
+      sorted.length % 2 === 0
+        ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+        : sorted[Math.floor(sorted.length / 2)];
+    const variance = vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length;
+    const std = Math.sqrt(variance);
+
+    res.json({
+      field,
+      mean: +mean.toFixed(4),
+      median: +median.toFixed(4),
+      std: +std.toFixed(4),
+      min: Math.min(...vals),
+      max: Math.max(...vals),
+      count: vals.length,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Gemini chat with tool calling (tools registered, no execution logic yet) ───
+
+const DEFAULT_SYSTEM_PROMPT = `You are the YouTube AI Chat Assistant. Help users analyze YouTube channel performance using JSON data they upload.`;
+
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { message, history = [], systemInstruction } = req.body;
+    if (!message || typeof message !== 'string')
+      return res.status(400).json({ error: 'message (string) is required' });
+    const chat = createChatModel(systemInstruction || DEFAULT_SYSTEM_PROMPT, history);
+    const result = await chat.sendMessage(message);
+    const response = result.response;
+    const text = response.text();
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    const funcCall = parts.find((p) => p.functionCall);
+    res.json({
+      text: text || '',
+      functionCall: funcCall
+        ? { name: funcCall.functionCall.name, args: funcCall.functionCall.args }
+        : null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PORT = process.env.PORT || 3001;
 
 connect()
   .then(() => {
-    app.listen(PORT, () => console.log(`Server on http://localhost:${PORT}`));
+    console.log("SERVER BOOT: before listen");
+    app.listen(PORT, () => {
+      console.log("SERVER BOOT: listening", PORT);
+      console.log(`Server on http://localhost:${PORT}`);
+    });
   })
   .catch((err) => {
-    console.error('MongoDB connection failed:', err.message);
+    console.error("SERVER BOOT: Mongo connect error", err);
     process.exit(1);
   });

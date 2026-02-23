@@ -5,3 +5,56 @@
 .App {
   min-height: 100vh;
 }
+
+/* ── Logged-in layout with tabs ───────────────────────────────────────────── */
+
+.app-logged-in {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.75rem 1.25rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.app-tab {
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.6);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.18s, background 0.18s, border-color 0.18s;
+}
+
+.app-tab:hover {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.app-tab.active {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.app-tab-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Chat fills tab content (overrides its default 100vh when in tab layout) */
+.app-tab-content .chat-layout {
+  height: 100%;
+}
