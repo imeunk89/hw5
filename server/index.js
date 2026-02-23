@@ -103,8 +103,9 @@ async function connect() {
   console.log("SERVER BOOT: Mongo connected");
 }
 
-app.get('/', (req, res) => {
-  res.send(`
+if (process.env.NODE_ENV !== 'production') {
+  app.get('/', (req, res) => {
+    res.send(`
     <html>
       <body style="font-family:sans-serif;padding:2rem;background:#00356b;color:white;min-height:100vh;display:flex;align-items:center;justify-content:center;margin:0">
         <div style="text-align:center">
@@ -115,7 +116,8 @@ app.get('/', (req, res) => {
       </body>
     </html>
   `);
-});
+  });
+}
 
 app.get('/api/status', async (req, res) => {
   try {
@@ -487,6 +489,15 @@ app.post('/api/chat', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ── Production: serve React build ─────────────────────────────────────────────
+
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, '..', 'build')));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'build', 'index.html'));
+  });
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
