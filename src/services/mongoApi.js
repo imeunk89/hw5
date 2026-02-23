@@ -1,4 +1,4 @@
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import API_BASE from './apiBase';
 
 function parseApiResponse(text) {
   if (!text || !text.trim()) return {};
@@ -13,7 +13,7 @@ function parseApiResponse(text) {
 }
 
 const api = async (path, options = {}) => {
-  const base = API_BASE.replace(/\/$/, '');
+  const base = (API_BASE || '').replace(/\/$/, '');
   const url = path.startsWith('http') ? path : `${base}${path.startsWith('/') ? path : `/${path}`}`;
   const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json', ...options.headers },
@@ -95,8 +95,11 @@ export const loadMessages = async (sessionId) => {
 };
 
 // ── YouTube channel download ─────────────────────────────────────────────────
-// Hardcoded: every YouTube URL = "http://localhost:3001" + path
-const YOUTUBE_BACKEND = 'http://localhost:3001';
+
+export function apiUrl(path) {
+  const base = (API_BASE || '').replace(/\/$/, '');
+  return `${base}${path.startsWith('/') ? path : `/${path}`}`;
+}
 
 async function youtubeFetch(url, options = {}) {
   const res = await fetch(url, {
@@ -125,7 +128,7 @@ export const startYoutubeDownload = async (channelUrl, maxVideos) => {
     channelUrl: String(channelUrl || '').trim(),
     maxVideos: Number(maxVideos) || 10,
   };
-  return youtubeFetch(YOUTUBE_BACKEND + '/api/youtube/download', {
+  return youtubeFetch(apiUrl('/api/youtube/download'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -133,7 +136,7 @@ export const startYoutubeDownload = async (channelUrl, maxVideos) => {
 };
 
 export const getYoutubeProgress = async (jobId) => {
-  return youtubeFetch(YOUTUBE_BACKEND + `/api/youtube/progress/${jobId}`);
+  return youtubeFetch(apiUrl(`/api/youtube/progress/${jobId}`));
 };
 
 // ── JSON upload (channel data for chat) ──────────────────────────────────────

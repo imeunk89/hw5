@@ -1,9 +1,6 @@
 import { useState } from 'react';
-import { startYoutubeDownload, getYoutubeProgress } from '../services/mongoApi';
+import { startYoutubeDownload, getYoutubeProgress, apiUrl } from '../services/mongoApi';
 import './YouTubeChannelDownload.css';
-
-// Hardcoded: "http://localhost:3001" + path (no relative paths)
-const YOUTUBE_BACKEND = 'http://localhost:3001';
 
 async function downloadChannelData(channelUrl, maxVideos, onProgress) {
   const trimmed = channelUrl.trim();
@@ -17,7 +14,7 @@ async function downloadChannelData(channelUrl, maxVideos, onProgress) {
   const poll = async () => {
     const data = await getYoutubeProgress(jobId);
     if (data.status === 'complete') {
-      return YOUTUBE_BACKEND + `/api/youtube/downloads/${data.fileName}`;
+      return apiUrl(`/api/youtube/downloads/${data.fileName}`);
     }
     if (data.status === 'error') throw new Error(data.error || 'Download failed');
     onProgress?.(data.progress ?? 0, data.message ?? 'Processing...');

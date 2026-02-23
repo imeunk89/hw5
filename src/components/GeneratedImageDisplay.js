@@ -1,11 +1,11 @@
 import { useState } from 'react';
-
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import API_BASE from '../services/apiBase';
 
 function toAbsoluteUrl(url) {
   if (!url) return '';
   if (url.startsWith('http')) return url;
-  return `${API_BASE.replace(/\/$/, '')}${url.startsWith('/') ? '' : '/'}${url}`;
+  const base = (API_BASE || '').replace(/\/$/, '');
+  return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
 }
 
 async function downloadImage(url) {
