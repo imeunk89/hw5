@@ -474,7 +474,7 @@ ${sessionSummary}${slimCsvBlock}
         (images.length
           ? 'What do you see in this image?'
           : currentChannelData
-            ? 'Please analyze this channel data.'
+            ? "I've uploaded channel data. What would you like to know?"
             : 'Please analyze this CSV data.'));
 
     // Only show JSON/CSV badge on the message that actually attached it (first use in session)
