@@ -30,18 +30,31 @@ export default function Auth({ onLogin }) {
         ? { username: name, password, email: email.trim(), firstName: firstName.trim(), lastName: lastName.trim() }
         : { username: name, password };
 
+    const doFetch = async () => {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const t = await r.text();
+      return { res: r, text: t };
+    };
+
     try {
-      let res;
+      let res, text;
       try {
-        res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
+        ({ res, text } = await doFetch());
       } catch (fetchErr) {
         throw new Error(`URL: ${url}\nFetch threw: ${fetchErr.message || 'Request failed'}`);
       }
-      const text = await res.text();
+
+      // Retry once if 200 with empty body (Render cold start)
+      if (res.ok && !(text ?? '').trim()) {
+        await new Promise((r) => setTimeout(r, 2500));
+        try {
+          ({ res, text } = await doFetch());
+        } catch {}
+      }
 
       if (!res.ok) {
         let msg = buildErrorDetail(url, res, text);
@@ -52,7 +65,12 @@ export default function Auth({ onLogin }) {
         throw new Error(msg);
       }
 
-      const data = text ? JSON.parse(text) : {};
+      if ((text ?? '').trim().startsWith('<')) {
+        throw new Error(
+          `백엔드 URL이 잘못되었습니다. HTML이 반환되었습니다.\nURL: ${url}\nREACT_APP_API_URL이 실제 백엔드 주소를 가리키는지 확인하세요.`
+        );
+      }
+      const data = (text ?? '').trim() ? JSON.parse(text) : {};
       if (mode === 'create') {
         setError('');
         setMode('login');
@@ -61,8 +79,14 @@ export default function Auth({ onLogin }) {
         setFirstName('');
         setLastName('');
       } else {
-        if (!data.ok)
-          throw new Error(buildErrorDetail(url, res, text));
+        if (!data.ok) {
+          const detail = buildErrorDetail(url, res, text);
+          const hint =
+            res.ok && !(text ?? '').trim()
+              ? '\n\n백엔드가 응답을 보내지 않았습니다. Render 무료 티어는 15분 비활성 후 슬립됩니다. 잠시 후 다시 시도하거나, 백엔드 URL(REACT_APP_API_URL)을 확인하세요.'
+              : '';
+          throw new Error(detail + hint);
+        }
         onLogin({
           username: data.username,
           firstName: data.firstName ?? null,

@@ -10,8 +10,33 @@ const bcrypt = require('bcryptjs');
 const cors = require('cors');
 
 const app = express();
-app.use(cors());
+
+const ALLOWED_ORIGINS = [
+  'https://hw5-k8eo.onrender.com',
+  'http://localhost:3000',
+  'http://localhost:3001',
+];
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      if (/^https:\/\/[a-z0-9-]+\.onrender\.com$/.test(origin)) return cb(null, true);
+      cb(null, false);
+    },
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
 app.use(express.json({ limit: '10mb' }));
+
+/** Ensure JSON response is sent with explicit Content-Length (avoids empty body issues) */
+function sendJson(res, data) {
+  const body = JSON.stringify(data);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Length', Buffer.byteLength(body, 'utf8'));
+  res.end(body);
+}
 
 // ── YouTube routes first (before any static/catch-all) ───────────────────────
 const { runDownload, DOWNLOADS_DIR } = require('./youtube');
@@ -145,7 +170,7 @@ app.post('/api/users', async (req, res) => {
       password: hashed,
       createdAt: new Date().toISOString(),
     });
-    res.json({
+    sendJson(res, {
       ok: true,
       user: { id: result.insertedId.toString(), username: name, email: emailNorm, firstName: first, lastName: last },
     });
@@ -165,7 +190,7 @@ app.post('/api/users/login', async (req, res) => {
     const ok = await bcrypt.compare(password, user.password);
     if (!ok) return res.status(401).json({ error: 'Invalid password' });
     // Return firstName/lastName for personalization; existing users may lack these (graceful fallback)
-    res.json({
+    sendJson(res, {
       ok: true,
       username: name,
       firstName: user.firstName ?? null,
