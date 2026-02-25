@@ -49,16 +49,17 @@ const GEMINI_TOOL_DECLARATIONS = [
   },
   {
     name: 'play_video',
-    description: 'Open or preview a specific video from the channel data.',
+    description:
+      'Play or open a YouTube video from the channel data. User can specify by title (e.g. "asbestos"), ordinal (first=1, second=2), or mostViewed. Pass exactly one of: videoUrl, titleQuery, ordinal, or mostViewed.',
     parameters: {
       type: 'OBJECT',
       properties: {
-        videoUrl: {
-          type: 'STRING',
-          description: 'Full YouTube video URL (e.g. https://www.youtube.com/watch?v=VIDEO_ID).',
-        },
+        videoUrl: { type: 'STRING', description: 'Full YouTube URL when available.' },
+        titleQuery: { type: 'STRING', description: 'Search string to match in video title.' },
+        ordinal: { type: 'NUMBER', description: '1-based position: 1=first, 2=second.' },
+        mostViewed: { type: 'BOOLEAN', description: 'If true, select highest view_count video.' },
       },
-      required: ['videoUrl'],
+      required: [],
     },
   },
   {

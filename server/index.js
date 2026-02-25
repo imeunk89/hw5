@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 require('node:dns').setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+const http = require('http');
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
@@ -94,6 +95,7 @@ const URI = process.env.REACT_APP_MONGODB_URI || process.env.MONGODB_URI || proc
 const DB = 'chatapp';
 
 const { createChatModel } = require('./geminiChat');
+const { withRetry, logTokenUsage } = require('./utils/retryGemini');
 
 let db;
 
@@ -300,6 +302,7 @@ app.get('/api/messages', async (req, res) => {
 // ── Generated images (generateImage tool) ───────────────────────────────────
 
 const IMAGES_STORE_DIR = path.join(__dirname, '..', 'generated-images');
+const { GoogleGenAI } = require('@google/genai');
 
 function generateImageId() {
   return `img_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -314,50 +317,39 @@ app.post('/api/images/generate', async (req, res) => {
     if (!prompt || typeof prompt !== 'string' || !prompt.trim())
       return res.status(400).json({ error: 'prompt (string) is required' });
 
+    const apiKey = process.env.REACT_APP_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    if (!apiKey)
+      return res.status(500).json({ error: 'REACT_APP_GEMINI_API_KEY or GEMINI_API_KEY not configured' });
+
     const apiBase = process.env.REACT_APP_API_URL || `http://localhost:${process.env.PORT || 3001}`;
     const storeDir = path.resolve(IMAGES_STORE_DIR);
-    await require('fs').promises.mkdir(storeDir, { recursive: true });
+    await fs.promises.mkdir(storeDir, { recursive: true });
 
-    // Minimal implementation: generate SVG placeholder with prompt text
-    const escapedPrompt = String(prompt)
-      .trim()
-      .slice(0, 120)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-    const words = escapedPrompt.split(/\s+/);
-    const lines = [];
-    let line = '';
-    for (const w of words) {
-      if (line.length + w.length + 1 > 36) {
-        if (line) lines.push(line);
-        line = w;
-      } else {
-        line = line ? `${line} ${w}` : w;
-      }
-    }
-    if (line) lines.push(line);
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateImages({
+      model: 'imagen-4.0-generate-001',
+      prompt: prompt.trim(),
+      config: { numberOfImages: 1 },
+    });
 
-    const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="384" viewBox="0 0 512 384">
-  <rect width="512" height="384" fill="#1a1a2e"/>
-  <rect x="16" y="16" width="480" height="352" rx="12" fill="none" stroke="#818cf8" stroke-width="2"/>
-  <text x="256" y="170" text-anchor="middle" fill="#e2e8f0" font-family="Inter,sans-serif" font-size="14">
-    ${lines.slice(0, 5).map((l, i) => `<tspan x="256" dy="${i === 0 ? 0 : 20}">${l}</tspan>`).join('')}
-  </text>
-  <text x="256" y="340" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-family="Inter,sans-serif" font-size="11">Generated</text>
-</svg>`;
+    const genImg = response?.generatedImages?.[0];
+    if (!genImg?.image?.imageBytes)
+      return res.status(500).json({ error: genImg?.raiFilteredReason || 'No image generated' });
 
+    const imgBytes = genImg.image.imageBytes;
+    const mimeType = genImg.image.mimeType || 'image/png';
+    const ext = mimeType.includes('jpeg') || mimeType.includes('jpg') ? 'jpg' : 'png';
     const imgId = generateImageId();
-    const fileName = `${imgId}.svg`;
+    const fileName = `${imgId}.${ext}`;
     const filePath = path.join(storeDir, fileName);
-    await require('fs').promises.writeFile(filePath, svg, 'utf8');
+    const buffer = Buffer.from(imgBytes, 'base64');
+    await fs.promises.writeFile(filePath, buffer);
 
     const imageUrl = `${apiBase.replace(/\/$/, '')}/generated/${fileName}`;
     res.json({ imageUrl });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[generateImage]', err);
+    res.status(500).json({ error: err.message || 'Image generation failed' });
   }
 });
 
@@ -459,8 +451,9 @@ app.post('/api/chat', async (req, res) => {
     if (!message || typeof message !== 'string')
       return res.status(400).json({ error: 'message (string) is required' });
     const chat = createChatModel(systemInstruction || DEFAULT_SYSTEM_PROMPT, history);
-    const result = await chat.sendMessage(message);
+    const result = await withRetry(() => chat.sendMessage(message));
     const response = result.response;
+    logTokenUsage(response, '/api/chat');
     const text = response.text();
     const parts = response.candidates?.[0]?.content?.parts || [];
     const funcCall = parts.find((p) => p.functionCall);
@@ -495,7 +488,8 @@ const PORT = process.env.PORT || 3001;
 connect()
   .then(() => {
     console.log("SERVER BOOT: before listen");
-    app.listen(PORT, () => {
+    const server = http.createServer({ maxHeaderSize: 32768 }, app);
+    server.listen(PORT, () => {
       console.log("SERVER BOOT: listening", PORT);
       console.log(`Server on http://localhost:${PORT}`);
     });

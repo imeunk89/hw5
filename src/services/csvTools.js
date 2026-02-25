@@ -79,6 +79,33 @@ export const CSV_TOOL_DECLARATIONS = [
     },
   },
   {
+    name: 'play_video',
+    description:
+      'Play or open a YouTube video from the loaded channel data. Use when the user asks to play, open, or watch a video. The user can specify by: (1) title — e.g. "play the asbestos video" → titleQuery; (2) ordinal — e.g. "play the first video" → ordinal 1; (3) most viewed — "play the most viewed" → mostViewed true. Pass exactly one of: videoUrl (full URL), titleQuery, ordinal, or mostViewed.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        videoUrl: {
+          type: 'STRING',
+          description: 'Full YouTube video URL when you have it (e.g. from channel data). Use when the video is already identified.',
+        },
+        titleQuery: {
+          type: 'STRING',
+          description: 'Search string to match in video title. E.g. "asbestos" for "play the asbestos video". Case-insensitive partial match.',
+        },
+        ordinal: {
+          type: 'NUMBER',
+          description: '1-based position in the list. 1 = first video, 2 = second, etc. Use for "play the first video" or "play video 3".',
+        },
+        mostViewed: {
+          type: 'BOOLEAN',
+          description: 'If true, select the video with the highest view_count. Use for "play the most viewed" or "play the most popular video".',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'compute_stats_json',
     description:
       'Compute descriptive statistics (mean, median, std, min, max, count) for a numeric field in the loaded JSON channel data. Use when the user has uploaded a YouTube channel JSON file and asks for stats on view_count, like_count, comment_count, duration, etc.',
@@ -310,7 +337,7 @@ export const computeDatasetSummary = (rows, headers) => {
 
 // ── Client-side tool executor ─────────────────────────────────────────────────
 
-export const executeTool = (toolName, args, rows, jsonExecutor = null, plotExecutor = null, imageExecutor = null) => {
+export const executeTool = (toolName, args, rows, jsonExecutor = null, plotExecutor = null, imageExecutor = null, playExecutor = null) => {
   if (toolName === 'generateImage') {
     if (imageExecutor) return imageExecutor(args);
     return { error: 'Image generation is not available.' };
@@ -323,10 +350,14 @@ export const executeTool = (toolName, args, rows, jsonExecutor = null, plotExecu
     if (plotExecutor) return plotExecutor(args);
     return { error: 'No JSON channel data loaded. Upload a YouTube channel JSON file first.' };
   }
-  const availableHeaders = rows.length ? Object.keys(rows[0]) : [];
+  if (toolName === 'play_video') {
+    if (playExecutor) return playExecutor(args);
+    return { error: 'No JSON channel data loaded. Upload a YouTube channel JSON file first.' };
+  }
+  const availableHeaders = (rows && rows.length) ? Object.keys(rows[0]) : [];
   console.group(`[CSV Tool] ${toolName}`);
   console.log('args:', args);
-  console.log('rows loaded:', rows.length);
+  console.log('rows loaded:', rows?.length ?? 0);
   console.log('available headers:', availableHeaders);
   console.groupEnd();
 

@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { CSV_TOOL_DECLARATIONS } from './csvTools';
+import { withRetry, logTokenUsage } from './retryGemini';
 
 const genAI = new GoogleGenerativeAI(process.env.REACT_APP_GEMINI_API_KEY || '');
 
@@ -77,7 +78,7 @@ export const streamChat = async function* (history, newMessage, imageParts = [],
     })),
   ].filter((p) => p.text !== undefined || p.inlineData !== undefined);
 
-  const result = await chat.sendMessageStream(parts);
+  const result = await withRetry(() => chat.sendMessageStream(parts));
 
   // Stream text chunks for live display
   for await (const chunk of result.stream) {
@@ -89,6 +90,7 @@ export const streamChat = async function* (history, newMessage, imageParts = [],
 
   // After stream: inspect all response parts
   const response = await result.response;
+  logTokenUsage(response, 'streamChat');
   const allParts = response.candidates?.[0]?.content?.parts || [];
 
   const hasCodeExecution = allParts.some(
@@ -187,7 +189,8 @@ export const chatWithCsvTools = async (history, newMessage, csvHeaders, executeF
     })),
   ].filter((p) => (p.text !== undefined && p.text !== '') || p.inlineData !== undefined);
 
-  let response = (await chat.sendMessage(msgParts)).response;
+  let response = (await withRetry(() => chat.sendMessage(msgParts))).response;
+  logTokenUsage(response, 'chatWithCsvTools');
 
   // Accumulate chart payloads and a log of every tool call made
   const charts = [];
@@ -216,11 +219,15 @@ export const chatWithCsvTools = async (history, newMessage, csvHeaders, executeF
       charts.push({ _chartType: 'generated_image', imageUrl: toolResult.imageUrl });
     }
 
-    response = (
-      await chat.sendMessage([
-        { functionResponse: { name, response: { result: toolResult } } },
-      ])
+    const toolResponse = (
+      await withRetry(() =>
+        chat.sendMessage([
+          { functionResponse: { name, response: { result: toolResult } } },
+        ])
+      )
     ).response;
+    logTokenUsage(toolResponse, `chatWithCsvTools/tool:${name}`);
+    response = toolResponse;
   }
 
   return { text: response.text(), charts, toolCalls };

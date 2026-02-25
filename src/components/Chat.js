@@ -16,6 +16,7 @@ import {
 import EngagementChart from './EngagementChart';
 import MetricVsTimeChart from './MetricVsTimeChart';
 import GeneratedImageDisplay from './GeneratedImageDisplay';
+import VideoPlayCard from './VideoPlayCard';
 import './Chat.css';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -389,16 +390,18 @@ export default function Chat({ user, onLogout }) {
     // PYTHON_ONLY = things the client tools genuinely cannot produce
     const PYTHON_ONLY_KEYWORDS = /\b(regression|scatter|histogram|seaborn|matplotlib|numpy|time.?series|heatmap|box.?plot|violin|distribut|linear.?model|logistic|forecast|trend.?line)\b/i;
     const wantPythonOnly = PYTHON_ONLY_KEYWORDS.test(text);
-    const wantCode = CODE_KEYWORDS.test(text) && !sessionCsvRows;
+    // When JSON is loaded, use tools (compute_stats_json, etc.) — don't force Python code execution
+    const wantCode = CODE_KEYWORDS.test(text) && !sessionCsvRows && !currentChannelData;
+    const wantImage = /\b(이미지|image|picture|thumbnail|그림|생성|만들|generate|create|draw|infographic|시각|썸네일)\b/i.test(text);
     const capturedCsv = csvContext;
     const hasCsvInSession = !!sessionCsvRows || !!capturedCsv;
     // Base64 is only worth sending when Gemini will actually run Python
     const needsBase64 = !!capturedCsv && wantPythonOnly;
     // Mode selection:
-    //   useTools        — CSV/JSON/image loaded or general request + no Python needed → tools (generateImage, etc.)
+    //   useTools        — CSV/JSON/image loaded, or user asks for image → tools (generateImage, etc.)
     //   useCodeExecution — Python explicitly needed (regression, histogram, etc.)
     //   else            — Google Search streaming
-    const useTools = (!!sessionCsvRows || !!currentChannelData || !!images.length) && !wantPythonOnly && !wantCode && !capturedCsv;
+    const useTools = (!!sessionCsvRows || !!currentChannelData || !!images.length || wantImage) && !wantPythonOnly && !wantCode && !capturedCsv;
     const useCodeExecution = wantPythonOnly || wantCode;
 
     // ── Build prompt ─────────────────────────────────────────────────────────
@@ -474,14 +477,17 @@ ${sessionSummary}${slimCsvBlock}
             ? 'Please analyze this channel data.'
             : 'Please analyze this CSV data.'));
 
+    // Only show JSON/CSV badge on the message that actually attached it (first use in session)
+    const prevUserHasJson = messages.some((m) => m.role === 'user' && m.jsonName);
+    const prevUserHasCsv = messages.some((m) => m.role === 'user' && m.csvName);
     const userMsg = {
       id: `u-${Date.now()}`,
       role: 'user',
       content: userContent,
       timestamp: new Date().toISOString(),
       images: [...images],
-      csvName: capturedCsv?.name || null,
-      jsonName: currentChannelData?.name || null,
+      csvName: capturedCsv?.name && !prevUserHasCsv ? capturedCsv.name : null,
+      jsonName: currentChannelData?.name && !prevUserHasJson ? currentChannelData.name : null,
     };
 
     setMessages((m) => [...m, userMsg]);
@@ -490,7 +496,7 @@ ${sessionSummary}${slimCsvBlock}
     const capturedChannelData = currentChannelData;
     setImages([]);
     setCsvContext(null);
-    setCurrentChannelData(null);
+    // Keep currentChannelData for the session so plot/play tools work on subsequent messages
     setStreaming(true);
 
     // Store display text only — base64 is never persisted
@@ -566,12 +572,40 @@ ${sessionSummary}${slimCsvBlock}
             return { error: err?.message || 'Failed to generate image' };
           }
         };
-        console.log('[Chat] useTools=true | rows:', sessionCsvRows.length, '| headers:', sessionCsvHeaders, '| json:', !!capturedChannelData, '| images:', capturedImages.length);
+        const playExecutor = capturedChannelData
+          ? (args) => {
+              const videos = capturedChannelData.data?.videos || [];
+              if (!videos.length) return { error: 'No video data available.' };
+              const { videoUrl, titleQuery, ordinal, mostViewed } = args || {};
+              let video = null;
+              if (videoUrl && typeof videoUrl === 'string' && videoUrl.includes('youtube')) {
+                video = videos.find((v) => v.video_url === videoUrl) || { video_url: videoUrl, title: 'Video', thumbnail_url: null };
+              } else if (mostViewed) {
+                const sorted = [...videos].sort((a, b) => (Number(b.view_count) || 0) - (Number(a.view_count) || 0));
+                video = sorted[0];
+              } else if (ordinal != null && ordinal >= 1) {
+                video = videos[ordinal - 1] || null;
+              } else if (titleQuery && typeof titleQuery === 'string') {
+                const q = titleQuery.trim().toLowerCase();
+                video = videos.find((v) => (v.title || '').toLowerCase().includes(q)) || null;
+              }
+              if (!video || !video.video_url) {
+                return { error: 'Could not find a matching video. Try by title (e.g. "asbestos"), ordinal (e.g. first=1), or mostViewed.' };
+              }
+              return {
+                _chartType: 'play_video',
+                videoUrl: video.video_url,
+                title: video.title || 'Video',
+                thumbnailUrl: video.thumbnail_url || null,
+              };
+            }
+          : null;
+        console.log('[Chat] useTools=true | rows:', sessionCsvRows?.length ?? 0, '| headers:', sessionCsvHeaders, '| json:', !!capturedChannelData, '| images:', capturedImages.length);
         const { text: answer, charts: returnedCharts, toolCalls: returnedCalls } = await chatWithCsvTools(
           history,
           promptForGemini,
           capturedChannelData ? undefined : sessionCsvHeaders,
-          (toolName, args) => executeTool(toolName, args, sessionCsvRows, jsonExecutor, plotExecutor, imageExecutor),
+          (toolName, args) => executeTool(toolName, args, sessionCsvRows, jsonExecutor, plotExecutor, imageExecutor, playExecutor),
           { firstName: user?.firstName ?? null, lastName: user?.lastName ?? null, username },
           imageParts
         );
@@ -810,6 +844,13 @@ ${sessionSummary}${slimCsvBlock}
                     key={ci}
                     data={chart.data}
                     metric={chart.metric}
+                  />
+                ) : chart._chartType === 'play_video' && chart.videoUrl ? (
+                  <VideoPlayCard
+                    key={ci}
+                    videoUrl={chart.videoUrl}
+                    title={chart.title}
+                    thumbnailUrl={chart.thumbnailUrl}
                   />
                 ) : chart._chartType === 'generated_image' && chart.imageUrl ? (
                   <GeneratedImageDisplay key={ci} imageUrl={chart.imageUrl} />

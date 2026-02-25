@@ -26,7 +26,7 @@ Use these tools when appropriate:
 |------|---------|
 | `compute_stats_json` | Numeric summaries (mean, median, std, min, max, count) for fields like view_count, like_count, duration |
 | `plot_metric_vs_time` | Trends over time — plot any numeric metric by release_date |
-| `play_video` | Opening or previewing a specific video (requires full video URL) |
+| `play_video` | Play or open a video from the channel — by title, ordinal (first/second), or most viewed |
 | `generateImage` | Thumbnails, visual mockups, infographics, or any image creation |
 
 ## Clarifying questions
@@ -54,10 +54,14 @@ When the system appends a [Personalization] block with the user's name, **addres
 - **Use when**: User asks to visualize trends over time.
 
 ### play_video
-- **Purpose**: Open or preview a specific video from the channel data.
-- **Inputs**: `{ videoUrl: string }` — full YouTube video URL.
-- **Outputs**: `{ success?: boolean, error?: string }`.
-- **Use when**: User wants to watch, preview, or reference a specific video.
+- **Purpose**: Play or open a YouTube video from the loaded channel data. Displays a clickable card with title and thumbnail; clicking opens the video on YouTube.
+- **Inputs** (pass exactly one):
+  - `videoUrl` — full YouTube URL when you have it from the data
+  - `titleQuery` — search string to match in title (e.g. "asbestos" for "play the asbestos video")
+  - `ordinal` — 1-based position: 1 = first video, 2 = second (e.g. "play the first video")
+  - `mostViewed` — true to select the video with highest view_count
+- **Outputs**: `{ videoUrl, title, thumbnailUrl }` (displayed as card) or `{ error: string }`.
+- **Use when**: User asks to play, open, or watch a video (e.g. "play the asbestos video", "play the first one", "open the most viewed").
 
 ### compute_stats_json
 - **Purpose**: Compute statistics (mean, median, std, min, max, count) for a numeric field.

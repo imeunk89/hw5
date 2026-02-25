@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { apiUrl } from '../services/mongoApi';
 import './Auth.css';
 
 function buildErrorDetail(url, res, text) {
@@ -23,7 +24,7 @@ export default function Auth({ onLogin }) {
     setError('');
     setLoading(true);
     const name = username.trim().toLowerCase();
-    const url = mode === 'create' ? '/api/users' : '/api/users/login';
+    const url = mode === 'create' ? apiUrl('/api/users') : apiUrl('/api/users/login');
     const body =
       mode === 'create'
         ? { username: name, password, email: email.trim(), firstName: firstName.trim(), lastName: lastName.trim() }
