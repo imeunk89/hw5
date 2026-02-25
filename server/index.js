@@ -15,6 +15,7 @@ app.use(express.json({ limit: '10mb' }));
 
 // ── YouTube routes first (before any static/catch-all) ───────────────────────
 const { runDownload, DOWNLOADS_DIR } = require('./youtube');
+const { getBackendPublicUrl, DEV_PORT } = require('../src/config/apiBase');
 const youtubeJobs = new Map();
 
 function generateJobId() {
@@ -321,10 +322,7 @@ app.post('/api/images/generate', async (req, res) => {
     if (!apiKey)
       return res.status(500).json({ error: 'REACT_APP_GEMINI_API_KEY or GEMINI_API_KEY not configured' });
 
-    const apiBase =
-      process.env.REACT_APP_API_URL ||
-      process.env.RENDER_EXTERNAL_URL ||
-      `http://localhost:${process.env.PORT || 3001}`;
+    const apiBase = getBackendPublicUrl();
     const storeDir = path.resolve(IMAGES_STORE_DIR);
     await fs.promises.mkdir(storeDir, { recursive: true });
 
@@ -486,7 +484,7 @@ if (fs.existsSync(buildPath)) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || DEV_PORT;
 
 connect()
   .then(() => {
