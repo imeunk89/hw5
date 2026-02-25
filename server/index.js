@@ -321,7 +321,10 @@ app.post('/api/images/generate', async (req, res) => {
     if (!apiKey)
       return res.status(500).json({ error: 'REACT_APP_GEMINI_API_KEY or GEMINI_API_KEY not configured' });
 
-    const apiBase = process.env.REACT_APP_API_URL || `http://localhost:${process.env.PORT || 3001}`;
+    const apiBase =
+      process.env.REACT_APP_API_URL ||
+      process.env.RENDER_EXTERNAL_URL ||
+      `http://localhost:${process.env.PORT || 3001}`;
     const storeDir = path.resolve(IMAGES_STORE_DIR);
     await fs.promises.mkdir(storeDir, { recursive: true });
 
