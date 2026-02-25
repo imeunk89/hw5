@@ -24,7 +24,7 @@ services:
       - key: REACT_APP_GEMINI_API_KEY
         sync: false   # set manually — baked into JS bundle at build time
       - key: REACT_APP_API_URL
-        sync: false   # REQUIRED: set to backend URL, e.g. https://chatapp-backend.onrender.com (no trailing slash)
+        sync: false   # Optional: if chatapp-frontend/chatapp-backend, auto-derived. Else set to https://YOUR-BACKEND.onrender.com
     routes:
       - type: rewrite
         source: /*
